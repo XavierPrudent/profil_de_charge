@@ -25,18 +25,36 @@ plot.freq()
 ## Select data period
 cut.data.period()
 
-## Fraction of trips with destination estimated
-frac.destOK()
-
 ## Merge of trips of a user
 merge.trips.info()
+
+## Fraction of trips with destination estimated
+frac.destOK()
 
 ## Plot charge profile - 24h
 plot.charge.profiles()
 
+#########################################
+## Time semi-histogram (moving mean)
+cards.ott <- cards %>% filter(NoLigne %in% routes.sto & NumArret >= 5000 & NumArret < 6000 )
+bing <- seq(0,24,0.25)
+hist.list <- vector("list",length=length(bing))
+for( i in 1:length(bing)){
+  fr <- cards.ott %>% 
+    filter( HeureTransaction <= bing[i] & HeureTransaction > bing[i] - 1) %>% 
+    nrow() / cards.ott %>% nrow()
+  hist.list[[i]] <- round(100*fr,digits = 1)
+}
+hist.df <- rbindlist(lapply(hist.list, as.list))
+hist.df$t <- bing
 
+p <- plot_ly(hist.df, x = ~t, y = ~V1, type = 'scatter', mode='lines') %>%
+  layout(yaxis = list(title = 'Pourcentage des déplacements (%)'), 
+         xaxis = list(title = "Heure de déplacements"))
+htmlwidgets::saveWidget(p, paste0(output.dir,"plots/achaldg_heure_lignesSTO_arretsOttawa.html"))
 
-
+####################
+## Remplissage des matrices
 my.lines.1 <- c(22,25,26,29,40,41,44,45,46,47)
 my.lines.2 <- c(48)
 my.lines.3 <- c(11,17)
@@ -60,6 +78,8 @@ my.stops.1 <- c(5048,5040,5032,5024,5025)
 my.stops.2 <- c(5026,5030,5034,5042,5050)
 my.stops.3 <- c(5014,5022,5030,5034,5042,5050)
 stops.sto <- c(my.stops.1,my.stops.2,my.stops.3)
+
+round(cards %>% filter(NoLigne == 400 & NumArret == 5030 ) %>% nrow() /21 / eff.destOK)
 
 round(cards %>% filter(NoLigne == 11 & NumArret %in% my.stops.2) %>% nrow() /21 / eff.destOK)
 round(cards %>% filter(NoLigne == 11 & NumArret %in% stops.sto) %>% nrow() /21 / eff.destOK)
@@ -110,7 +130,7 @@ my.lines <- c(22,25,26,29,40,41,44,45,46,47,48,11,17,27,85,88,93,
 my.stops <- c(5048,5040,5032,5024,5025,
               5026,5030,5034,5042,5050,
               5014,5022,5030,5034,5042,5050,5016)
-md <- "d"
+md <- "m"
 create.matrix.md(my.lines,my.stops,md)
 
 create.matrix.md <- function(my.lines,my.stops,md){

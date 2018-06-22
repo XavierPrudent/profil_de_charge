@@ -3,7 +3,10 @@
 set.user.data <- function(){
   gtfs  <<- "/Users/lavieestuntoucan/civ-sto/data/GTFS/sto/jan2017-july2017/"
   chipCards <<- "/Users/lavieestuntoucan/civ-sto/data/cartes_a_puces/sto/destination_estimee/Deplacement2017JanFev.CSV"
-  
+  routes.sto <<- c( 11, 17, 22, 23, 24, 25, 26, 27, 29, 31, 
+                    32, 33, 34, 35, 36, 37, 38, 40, 41, 44, 
+                    45, 46, 47, 55, 59, 67, 87, 85, 82, 94, 
+                    98, 93, 95, 300, 400, 200, 20 )
   trip.tag <<- "HIV"
   my.week  <<- c("Tuesday","Wednesday","Thursday")
   my.week.tag <<- "Semaine"
@@ -11,8 +14,6 @@ set.user.data <- function(){
   first.day <<- as.Date("2017-01-09")
   last.day <<- as.Date("2017-02-26")
 }
-
-
 #####################################################
 read.gtfs <- function(){
   trips <<- fread(paste0(gtfs,"trips.txt"))
@@ -56,14 +57,6 @@ cut.data.period <- function(){
     filter(weekday %in% my.week)
 }
 #####################################################
-frac.destOK <- function(){
-  n.all <- nrow(cards)
-  n.destOK <- cards %>% filter(!is.na(NumArretDebarquement1)) %>% nrow()
-  eff.destOK <<-  n.destOK / n.all
-  frac.cartes <<- 0.80
-  n.days <<- length(unique(cards$DateDeplacement))
-}
-#####################################################
 ## define a helper function
 empty_as_na <- function(x){
   if("factor" %in% class(x)) x <- as.character(x) ## since ifelse wont work with factors
@@ -90,14 +83,23 @@ merge.trips.info <- function(){
   NumArretDebarquement <- c(cards$NumArretDebarquement1,cards$NumArretDebarquement2,cards$NumArretDebarquement3,
                             cards$NumArretDebarquement4,cards$NumArretDebarquement5,cards$NumArretDebarquement6,
                             cards$NumArretDebarquement7,cards$NumArretDebarquement8,cards$NumArretDebarquement9,cards$NumArretDebarquement10)
-  ## Make de dataframe
+  ## Make the dataframe
   cards <<- data.frame(DateDeplacement,HeureTransaction,NoLigne,NumArret,NumArretDebarquement)
-  cards <<- cards %>% filter(!is.na(NumArretDebarquement))
+  cards <<- cards %>% filter(!is.na(NoLigne) & !is.na(NumArret) )
   ## Hour
   cards <<- cards %>% 
     separate(col=HeureTransaction, sep=":", into=c("Hres","Mins","Secs")) %>% 
     mutate(weekday=weekdays(DateDeplacement)) %>%
     mutate(HeureTransaction = round(as.numeric(Hres) + as.numeric(Mins)/60,digits=1)) %>% select(-c(Hres,Mins,Secs))
+  cards.clean <<- cards %>% filter(!is.na(NumArretDebarquement))
+}
+#####################################################
+frac.destOK <- function(){
+  n.all <- nrow(cards)
+  n.destOK <- cards %>% filter(!is.na(NumArretDebarquement)) %>% nrow()
+  eff.destOK  <<-  n.destOK / n.all
+  frac.cartes <<- 0.80
+  n.days <<- length(unique(cards$DateDeplacement))
 }
 #####################################################
 ## Count charge and plot profile per routes
@@ -111,12 +113,13 @@ plot.charge.profiles <- function(){
       ##
       ## Count
       df <- count.charge(i.route_id,i.var)
+      print(df)
       if( is.na(df)[1] ) next
       ##
       ## Plot the data and save
       p <- create.plotly(df)
       htmlwidgets::saveWidget(p, paste0(output.dir,"profilCharge_ligne",i.route_id,"_",i.var,".html"))
-    }
+          }
   }
 }
 #####################################################
@@ -156,30 +159,36 @@ count.charge <- function(i.route_id,i.var){
   if( nrow(list.stops) != length(unique(list.stops$stop_id)) ) return(NA) # no loops
   ##
   ## Extract trips on this line and variant
-  i.cards <- cards %>% filter(NoLigne == i.route_id & 
-                                !is.na(NumArretDebarquement) &
-                                NumArret %in% list.stops$stop_id &
-                                NumArretDebarquement %in% list.stops$stop_id) %>% 
+  
+  ## Clean data (only valid final stops)
+  i.cards.clean <- cards.clean %>% filter(NoLigne == i.route_id & 
+                                            !is.na(NumArretDebarquement) &
+                                            NumArret %in% list.stops$stop_id &
+                                            NumArretDebarquement %in% list.stops$stop_id) %>% 
     rowwise() %>% 
     mutate(NumArretSeq = list.stops[which(list.stops$stop_id == NumArret),"stop_seq"],
            NumArretDebarquementSeq = list.stops[which(list.stops$stop_id == NumArretDebarquement),"stop_seq"]) %>%
     filter(NumArretDebarquementSeq > NumArretSeq)
+  ## All data (final stop valid or NA)
+  i.cards <- cards %>% filter(NoLigne == i.route_id & 
+                                NumArret %in% list.stops$stop_id)
   ##
-  ## Number of in and out
+  ## Number of in and out, mont.glo is the number of montees from data w/wo valid final stops
   df.stops.j <- list.stops %>% 
-    mutate(mont=NA,mont.tot=NA,des=NA,des.tot=NA,charge=NA) %>%
+    mutate(mont.glo=NA,mont=NA,mont.tot=NA,des=NA,des.tot=NA,charge=NA) %>%
     rowwise() %>% 
-    mutate(mont = length(which(i.cards$NumArret == stop_id)), 
-           des = length(which(i.cards$NumArretDebarquement == stop_id)))
+    mutate(mont.glo = length(which(i.cards$NumArret == stop_id)), 
+           mont = length(which(i.cards.clean$NumArret == stop_id)), 
+           des = length(which(i.cards.clean$NumArretDebarquement == stop_id)))
   ##
   ## Scale up according to the algorithm efficiency
   df.stops.j <- mutate(df.stops.j,  mont = mont / eff.destOK, des = des / eff.destOK)
   ##
   ## Scale up according to the fraction of trips with cards
-  df.stops.j <- mutate(df.stops.j,  mont = mont / frac.cartes, des = des / frac.cartes)
+  df.stops.j <- mutate(df.stops.j,  mont.glo = mont.glo / frac.cartes, mont = mont / frac.cartes, des = des / frac.cartes)
   ##
   ## Average down to the number of days included
-  df.stops.j <- mutate(df.stops.j,  mont = mont / n.days, des = des / n.days )
+  df.stops.j <- mutate(df.stops.j,  mont.glo = mont.glo / n.days, mont = mont / n.days, des = des / n.days )
   ##
   ## Total loading
   df.stops.j$mont <- round(df.stops.j$mont)
